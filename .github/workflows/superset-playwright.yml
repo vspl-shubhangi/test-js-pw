@@ -11,16 +11,17 @@ on:
 
   workflow_dispatch:
 
+permissions:
+  contents: read
 
 jobs:
 
   test:
 
+    name: Superset E2E Tests
+
     runs-on: ubuntu-latest
 
-    # ==========================================================
-    # PostgreSQL service
-    # ==========================================================
     services:
 
       postgres:
@@ -36,61 +37,67 @@ jobs:
 
         options: >-
           --health-cmd="pg_isready -U postgres -d superset"
-          --health-interval=5s
+          --health-interval=10s
           --health-timeout=5s
           --health-retries=10
 
-
     steps:
 
-      # ========================================================
+      # ---------------------------------------------------------
       # 1. Checkout
-      # ========================================================
+      # ---------------------------------------------------------
 
       - name: Checkout source code
         uses: actions/checkout@v4
 
 
-      # ========================================================
+      # ---------------------------------------------------------
       # 2. Setup Python
-      # ========================================================
+      # ---------------------------------------------------------
 
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: "pip"
 
 
-      # ========================================================
-      # 3. Install dependencies
-      # ========================================================
+      # ---------------------------------------------------------
+      # 3. Install Python dependencies
+      # ---------------------------------------------------------
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+          pip install pytest pytest-playwright pytest-html
 
 
-      # ========================================================
+      # ---------------------------------------------------------
       # 4. Install Playwright Chromium
-      # ========================================================
+      # ---------------------------------------------------------
 
       - name: Install Playwright Chromium
         run: |
           playwright install --with-deps chromium
 
 
-      # ========================================================
+      # ---------------------------------------------------------
       # 5. Verify PostgreSQL
-      # ========================================================
+      # ---------------------------------------------------------
 
       - name: Verify PostgreSQL
         env:
           PGPASSWORD: postgres
-
         run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
 
-          echo "Checking PostgreSQL..."
+          echo "Waiting for PostgreSQL..."
 
           timeout 60s bash -c '
             until pg_isready \
@@ -99,292 +106,269 @@ jobs:
               -U postgres \
               -d superset
             do
-              echo "Waiting for PostgreSQL..."
               sleep 2
             done
           '
 
-          echo "PostgreSQL is READY"
+          echo "PostgreSQL is ready."
 
 
-      # ========================================================
+      # ---------------------------------------------------------
       # 6. Start Superset
-      # ========================================================
+      # ---------------------------------------------------------
 
       - name: Start Superset
         run: |
 
-          echo "Starting Superset container..."
-
           docker run -d \
             --name superset \
             -p 8088:8088 \
-            -e SUPERSET_SECRET_KEY=ci-secret-key \
+            -e SUPERSET_SECRET_KEY="ci-secret-key-change-me" \
             apache/superset:latest
 
-          echo "Superset container started"
+          echo "Superset container started."
 
-          docker ps -a
+          docker ps
 
-          echo ""
-          echo "Checking Superset container..."
 
-          if ! docker ps \
-            --format '{{.Names}}' \
-            | grep -q '^superset$'
-          then
-            echo "ERROR: Superset container is not running"
+      # ---------------------------------------------------------
+      # 7. Check Superset container
+      # ---------------------------------------------------------
 
-            echo ""
-            echo "===== SUPERSET LOGS ====="
+      - name: Check Superset container
+        run: |
 
+          sleep 10
+
+          if ! docker ps --format '{{.Names}}' | grep -q '^superset$'; then
+            echo "Superset container is not running."
+
+            echo "===== Superset logs ====="
             docker logs superset || true
 
             exit 1
           fi
 
+          echo "Superset container is running."
 
-      # ========================================================
-      # 7. Wait for Superset
-      #
-      # IMPORTANT:
-      # Every curl request has a timeout.
-      # The whole wait is limited to 2 minutes.
-      # ========================================================
+
+      # ---------------------------------------------------------
+      # 8. Wait for Superset
+      # ---------------------------------------------------------
 
       - name: Wait for Superset
         run: |
 
-          echo "Waiting for Superset to become ready..."
+          echo "Waiting for Superset to become available..."
 
-          READY=false
+          for i in {1..60}; do
 
-          for i in {1..24}; do
-
-            echo ""
-            echo "Health check $i/24"
+            echo "Health check attempt $i/60"
 
             if curl \
-              --connect-timeout 2 \
-              --max-time 5 \
-              --fail \
               --silent \
               --show-error \
-              http://127.0.0.1:8088/health
-            then
+              --fail \
+              --connect-timeout 2 \
+              --max-time 5 \
+              http://127.0.0.1:8088/health; then
 
               echo ""
-              echo "=========================================="
-              echo "Superset is READY"
-              echo "=========================================="
-
-              READY=true
+              echo "Superset is ready."
 
               break
-
             fi
 
-            # Check whether the container has crashed
-            if ! docker ps \
-              --format '{{.Names}}' \
-              | grep -q '^superset$'
-            then
+            if ! docker ps --format '{{.Names}}' | grep -q '^superset$'; then
 
-              echo ""
-              echo "=========================================="
-              echo "Superset container STOPPED unexpectedly"
-              echo "=========================================="
+              echo "Superset container stopped unexpectedly."
 
-              docker ps -a
-
-              echo ""
-              echo "===== SUPERSET LOGS ====="
+              echo "===== Superset logs ====="
 
               docker logs superset || true
 
               exit 1
-
             fi
 
-            echo "Superset not ready yet..."
             sleep 5
 
           done
 
 
-          if [ "$READY" != "true" ]; then
+      # ---------------------------------------------------------
+      # 9. Final Superset health check
+      # ---------------------------------------------------------
 
-            echo ""
-            echo "=========================================="
-            echo "ERROR: Superset did not become ready"
-            echo "=========================================="
-
-            echo ""
-            echo "===== CONTAINER STATUS ====="
-
-            docker ps -a
-
-            echo ""
-            echo "===== SUPERSET LOGS ====="
-
-            docker logs superset || true
-
-            exit 1
-
-          fi
-
-
-      # ========================================================
-      # 8. Display Superset URL
-      # ========================================================
-
-      - name: Superset URL
+      - name: Verify Superset
         run: |
 
+          echo "Testing Superset..."
+
+          curl \
+            --fail \
+            --connect-timeout 5 \
+            --max-time 10 \
+            http://127.0.0.1:8088/health
+
           echo ""
-          echo "=========================================="
-          echo "SUPERSET"
-          echo "=========================================="
+          echo "Superset is accessible."
 
-          echo "Superset URL:"
+
+      # ---------------------------------------------------------
+      # 10. Display CI Superset URL
+      # ---------------------------------------------------------
+
+      - name: Superset CI URL
+        run: |
+
+          echo "=========================================="
+          echo "Superset is running inside GitHub runner"
+          echo "=========================================="
+          echo ""
+          echo "URL:"
           echo "http://127.0.0.1:8088"
-
           echo ""
           echo "IMPORTANT:"
-          echo "This URL is available inside the GitHub"
-          echo "Actions runner only."
-
+          echo "This URL is accessible only inside the GitHub runner."
+          echo "It is NOT publicly accessible from your browser."
           echo "=========================================="
 
 
-      # ========================================================
-      # 9. Run Playwright tests
+      # ---------------------------------------------------------
+      # 11. Create reports directory
+      # ---------------------------------------------------------
+
+      - name: Prepare test reports
+        run: |
+          mkdir -p reports
+          mkdir -p test-results
+          mkdir -p playwright-report
+
+
+      # ---------------------------------------------------------
+      # 12. Run Playwright tests
+      # ---------------------------------------------------------
       #
-      # HEADLESS MODE
-      # Fixes:
-      # Missing X server
-      # Missing DISPLAY
-      # BrowserType.launch TargetClosedError
-      # ========================================================
+      # IMPORTANT:
+      #
+      # pytest.ini contains:
+      #
+      #   --headed
+      #   --browser-channel chrome
+      #   -n 4
+      #
+      # GitHub runner does not have an X server.
+      #
+      # Therefore we override addopts:
+      #
+      #   -o addopts=""
+      #
+      # and explicitly run headless Chromium.
+      #
+      # ---------------------------------------------------------
 
       - name: Run Playwright tests
         env:
-          PLAYWRIGHT_HEADLESS: "true"
           BASE_URL: "http://127.0.0.1:8088"
+          PLAYWRIGHT_HEADLESS: "true"
 
         run: |
 
-          echo "=========================================="
-          echo "Running Playwright tests"
-          echo "=========================================="
-
           pytest tests/ \
+            -o addopts="" \
             --browser chromium \
-            --html=report.html \
+            --html=reports/report.html \
             --self-contained-html
 
 
-      # ========================================================
-      # 10. Upload Playwright report
-      #
-      # ALWAYS upload, even when tests fail.
-      # ========================================================
+      # ---------------------------------------------------------
+      # 13. Upload Playwright HTML report
+      # ---------------------------------------------------------
 
-      - name: Upload Playwright report
+      - name: Upload Playwright HTML report
         if: always()
-
         uses: actions/upload-artifact@v4
 
         with:
-          name: playwright-test-report
-
+          name: playwright-html-report
           path: |
-            report.html
+            reports/report.html
+          if-no-files-found: warn
+
+
+      # ---------------------------------------------------------
+      # 14. Upload Playwright test results
+      # ---------------------------------------------------------
+
+      - name: Upload Playwright test results
+        if: always()
+        uses: actions/upload-artifact@v4
+
+        with:
+          name: playwright-test-results
+          path: |
             test-results/
             playwright-report/
-
           if-no-files-found: ignore
 
 
-      # ========================================================
-      # 11. Upload test results
-      # ========================================================
-
-      - name: Upload test results
-        if: always()
-
-        uses: actions/upload-artifact@v4
-
-        with:
-          name: test-results
-
-          path: |
-            report.html
-            test-results/
-
-          if-no-files-found: ignore
-
-
-      # ========================================================
-      # 12. Collect Superset logs
-      #
-      # Useful if anything fails.
-      # ========================================================
+      # ---------------------------------------------------------
+      # 15. Collect Superset logs
+      # ---------------------------------------------------------
 
       - name: Collect Superset logs
         if: always()
-
         run: |
 
           echo "=========================================="
-          echo "SUPERSET CONTAINER STATUS"
+          echo "SUPSERSET CONTAINER STATUS"
           echo "=========================================="
 
           docker ps -a || true
 
           echo ""
           echo "=========================================="
-          echo "SUPERSET LOGS"
+          echo "SUPSERSET LOGS"
           echo "=========================================="
 
-          docker logs superset --tail 200 || true
+          docker logs superset 2>&1 || true
 
 
-      # ========================================================
-      # 13. Upload Superset logs
-      # ========================================================
+      # ---------------------------------------------------------
+      # 16. Save Superset logs as artifact
+      # ---------------------------------------------------------
 
       - name: Save Superset logs
         if: always()
-
         run: |
 
-          docker logs superset > superset.log 2>&1 || true
+          mkdir -p docker-logs
 
+          docker logs superset \
+            > docker-logs/superset.log 2>&1 || true
+
+
+      # ---------------------------------------------------------
+      # 17. Upload Superset logs
+      # ---------------------------------------------------------
 
       - name: Upload Superset logs
         if: always()
-
         uses: actions/upload-artifact@v4
 
         with:
           name: superset-logs
-          path: superset.log
+          path: docker-logs/
           if-no-files-found: ignore
 
 
-      # ========================================================
-      # 14. Cleanup
-      # ========================================================
+      # ---------------------------------------------------------
+      # 18. Cleanup
+      # ---------------------------------------------------------
 
-      - name: Stop Superset
+      - name: Cleanup Superset
         if: always()
-
         run: |
-
-          echo "Stopping Superset..."
 
           docker stop superset || true
           docker rm superset || true
-
-          echo "Cleanup completed"
