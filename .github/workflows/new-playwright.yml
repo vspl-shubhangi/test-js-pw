@@ -11,11 +11,9 @@ on:
 
   workflow_dispatch:
 
-# Minimum permissions required by the workflow
 permissions:
   contents: read
 
-# Prevent duplicate runs for the same branch/PR
 concurrency:
   group: eva-playwright-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -32,14 +30,12 @@ jobs:
 
     env:
       BASE_URL: https://evafi.relintex.dev/
-
-      # CI environment
       CI: true
 
     steps:
 
       # --------------------------------------------------
-      # 1. Checkout source code
+      # 1. Checkout
       # --------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -52,11 +48,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
+          cache: pip
 
 
       # --------------------------------------------------
-      # 3. Install Python dependencies
+      # 3. Install dependencies
       # --------------------------------------------------
       - name: Install dependencies
         run: |
@@ -74,7 +70,7 @@ jobs:
 
 
       # --------------------------------------------------
-      # 4. Install Playwright Chromium
+      # 4. Install Playwright browser
       # --------------------------------------------------
       - name: Install Playwright Chromium
         run: |
@@ -84,15 +80,19 @@ jobs:
       # --------------------------------------------------
       # 5. Verify environment
       # --------------------------------------------------
-      - name: Verify test environment
+      - name: Verify environment
         run: |
-          echo "Python version:"
+          echo "=========================================="
+          echo "Environment"
+          echo "=========================================="
+
+          echo "Python:"
           python --version
 
-          echo "Pytest version:"
+          echo "Pytest:"
           pytest --version
 
-          echo "Playwright version:"
+          echo "Playwright:"
           python -m playwright --version
 
           echo "BASE_URL:"
@@ -104,26 +104,37 @@ jobs:
       # --------------------------------------------------
       - name: Run Eva Playwright tests
         id: playwright
-        continue-on-error: true
+        shell: bash
         run: |
           mkdir -p reports
+
+          set +e
 
           pytest tests/ \
             -o addopts="" \
             --browser chromium \
-            -n 4 \
+            -n 2 \
             --html=reports/report.html \
             --self-contained-html \
             --junitxml=reports/junit.xml
 
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          TEST_EXIT_CODE=$?
+
+          echo "TEST_EXIT_CODE=$TEST_EXIT_CODE" >> "$GITHUB_ENV"
+
+          echo "Playwright exit code: $TEST_EXIT_CODE"
+
+          # Do not fail yet.
+          # Reports and artifacts must be collected first.
+          exit 0
 
 
       # --------------------------------------------------
-      # 7. Collect Playwright screenshots
+      # 7. Compress screenshots
       # --------------------------------------------------
       - name: Compress Playwright screenshots
         if: always()
+        shell: bash
         run: |
           if [ -d "reports/screenshots" ] && \
              [ "$(find reports/screenshots -type f | wc -l)" -gt 0 ]; then
@@ -134,7 +145,7 @@ jobs:
             echo "Screenshots compressed successfully."
 
           else
-            echo "No Playwright screenshots found."
+            echo "No screenshots found."
           fi
 
 
@@ -167,7 +178,7 @@ jobs:
 
 
       # --------------------------------------------------
-      # 10. Upload Playwright test-results
+      # 10. Upload Playwright test results / traces
       # --------------------------------------------------
       - name: Upload Playwright test results
         if: always()
@@ -184,6 +195,7 @@ jobs:
       # --------------------------------------------------
       - name: Test summary
         if: always()
+        shell: bash
         run: |
           echo "## Eva Playwright E2E Test Results" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -192,27 +204,31 @@ jobs:
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Environment | CI |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Browser | Chromium |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Base URL | $BASE_URL |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Workers | 2 |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Base URL | $BASE_URL |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Run | #${{ github.run_number }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Test Exit Code | ${TEST_EXIT_CODE:-unknown} |" >> "$GITHUB_STEP_SUMMARY"
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Reports and screenshots are available in GitHub Actions Artifacts." >> "$GITHUB_STEP_SUMMARY"
+          echo "Reports and diagnostic artifacts are available above." \
+            >> "$GITHUB_STEP_SUMMARY"
 
 
       # --------------------------------------------------
-      # 12. Fail pipeline if tests failed
+      # 12. Final status
       # --------------------------------------------------
       - name: Final test status
         if: always()
+        shell: bash
         run: |
-          if [ "${{ steps.playwright.outputs.exit_code }}" != "0" ]; then
-            echo "=========================================="
+          echo "=========================================="
+
+          if [ "${TEST_EXIT_CODE:-1}" -ne 0 ]; then
             echo "EVA PLAYWRIGHT TESTS FAILED"
+            echo "Exit code: ${TEST_EXIT_CODE:-unknown}"
             echo "=========================================="
             exit 1
           fi
 
-          echo "=========================================="
           echo "EVA PLAYWRIGHT TESTS PASSED"
           echo "=========================================="
