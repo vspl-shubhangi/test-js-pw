@@ -111,7 +111,7 @@ jobs:
           pytest tests/ \
             -o addopts="" \
             --browser chromium \
-            -n 2 \
+            -n 4 \
             --html=reports/report.html \
             --self-contained-html \
             --junitxml=reports/junit.xml
