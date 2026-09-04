@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Evafi Test Suite — Dynamic Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: #121b30;
+    --panel-2: #17213b;
+    --border: #263252;
+    --text: #e7ecf7;
+    --muted: #93a0bd;
+    --accent: #4da3ff;
+    --pass: #2fbf71;
+    --fail: #ef5164;
+    --skip: #f2b134;
+    --error: #b968ff;
+    --rerun: #7d8bab;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+  }
+  header h1 { font-size: 19px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button, .file-btn {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  button:hover, .file-btn:hover { background: #1d2947; border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #04101f; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+  input[type=file] { display: none; }
+  #autoRefreshLabel { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  main { padding: 24px 28px 60px; max-width: 1400px; margin: 0 auto; }
+
+  .status-banner {
+    padding: 10px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 18px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--muted); display: none;
+  }
+  .status-banner.show { display: block; }
+  .status-banner.err { border-color: var(--fail); color: #ffb2bc; }
+  .status-banner.ok { border-color: var(--pass); color: #b8f0cf; }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 22px; }
+  @media (max-width: 1100px) { .kpi-row { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 620px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
+  .kpi-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 16px 14px; position: relative; overflow: hidden;
+  }
+  .kpi-card .value { font-size: 26px; font-weight: 700; line-height: 1.1; }
+  .kpi-card .label { color: var(--muted); font-size: 12px; margin-top: 4px; text-transform: uppercase; letter-spacing: .04em; }
+  .kpi-card.total .value { color: var(--accent); }
+  .kpi-card.passed .value { color: var(--pass); }
+  .kpi-card.failed .value { color: var(--fail); }
+  .kpi-card.skipped .value { color: var(--skip); }
+  .kpi-card.error .value { color: var(--error); }
+  .kpi-card.rate .value { color: var(--text); }
+  .kpi-card .bar { position: absolute; left: 0; bottom: 0; height: 3px; background: currentColor; opacity: .5; }
+
+  .panels { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; margin-bottom: 22px; }
+  @media (max-width: 980px) { .panels { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+  .panel h3 { margin: 0 0 12px; font-size: 13.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+
+  .class-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; font-size: 12.5px; }
+  .class-row .cname { width: 190px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); cursor: pointer; }
+  .class-row .cname:hover { color: var(--accent); }
+  .class-row .stack { flex: 1; height: 16px; border-radius: 4px; overflow: hidden; display: flex; background: #0d1526; }
+  .class-row .stack div { height: 100%; }
+  .class-row .ccount { width: 46px; text-align: right; color: var(--muted); flex-shrink: 0; }
+
+  .donut-wrap { display: flex; align-items: center; gap: 20px; }
+  .donut { width: 150px; height: 150px; border-radius: 50%; flex-shrink: 0; }
+  .legend { display: flex; flex-direction: column; gap: 7px; font-size: 12.5px; }
+  .legend .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 7px; }
+
+  .filter-bar {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  }
+  .filter-bar input[type=text] {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 12px; border-radius: 7px; font-size: 13px; min-width: 220px; flex: 1;
+  }
+  .chip-group { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    padding: 6px 12px; border-radius: 999px; font-size: 12px; cursor: pointer;
+    -webkit-user-select: none; user-select: none;
+    border: 1px solid var(--border); color: var(--muted); background: var(--panel-2);
+  }
+  .chip.active { color: #04101f; font-weight: 600; border-color: transparent; }
+  .chip[data-status="Passed"].active { background: var(--pass); }
+  .chip[data-status="Failed"].active { background: var(--fail); }
+  .chip[data-status="Skipped"].active { background: var(--skip); }
+  .chip[data-status="Error"].active { background: var(--error); }
+  .chip[data-status="Rerun"].active, .chip[data-status="XPassed"].active, .chip[data-status="XFailed"].active { background: var(--rerun); }
+  select {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 10px; border-radius: 7px; font-size: 13px;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    text-align: left; padding: 10px 12px; color: var(--muted); font-weight: 600;
+    border-bottom: 1px solid var(--border); cursor: pointer; white-space: nowrap; font-size: 12px;
+    text-transform: uppercase; letter-spacing: .03em;
+  }
+  thead th:hover { color: var(--accent); }
+  tbody tr { border-bottom: 1px solid #1b2540; cursor: pointer; }
+  tbody tr:hover { background: #101a30; }
+  tbody td { padding: 9px 12px; vertical-align: top; }
+  .badge {
+    display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700;
+    color: #04101f;
+  }
+  .badge.Passed { background: var(--pass); }
+  .badge.Failed { background: var(--fail); }
+  .badge.Skipped { background: var(--skip); }
+  .badge.Error { background: var(--error); }
+  .badge.Rerun, .badge.XPassed, .badge.XFailed { background: var(--rerun); color: #fff; }
+  .test-name { color: var(--text); }
+  .test-class { color: var(--accent); }
+  .test-file { color: var(--muted); font-size: 11.5px; }
+  .log-row td { background: #0d1526; padding: 12px 16px; font-family: "SF Mono", Consolas, monospace; font-size: 11.5px; color: #c8d3ea; white-space: pre-wrap; max-height: 260px; overflow-y: auto; }
+
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .empty-state .big { font-size: 42px; margin-bottom: 10px; }
+  footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 20px; }
+  code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; }
+
+  /* Utility classes replacing what were previously static inline styles */
+  .hidden { display: none; }
+  .panel-table { padding: 0; overflow-x: auto; }
+  .results-count { color: var(--muted); font-size: 12px; margin-top: 10px; }
+  .empty-detail { margin-top: 6px; }
+  .kpi-bar-full { width: 100%; }
+  .no-data-msg { color: var(--muted); font-size: 12.5px; }
+  .no-match-msg { text-align: center; color: var(--muted); padding: 30px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Evafi Test Suite — Dynamic Dashboard</h1>
+    <div class="sub" id="metaLine">No report loaded yet.</div>
+  </div>
+  <div class="controls">
+    <label class="file-btn" for="fileInput">📂 Load report.html</label>
+    <input type="file" id="fileInput" accept=".html,.htm" aria-label="Load a pytest-html report.html file" />
+    <button id="autoFetchBtn" class="primary">🔄 Auto-fetch report.html</button>
+    <span id="autoRefreshLabel">
+      <input type="checkbox" id="autoRefreshToggle" aria-label="Enable auto-refresh every 30 seconds" />
+      Auto-refresh (30s)
+    </span>
+  </div>
+</header>
+
+<main>
+  <div id="statusBanner" class="status-banner"></div>
+
+  <div id="dashboardContent" class="hidden">
+    <div class="kpi-row" id="kpiRow"></div>
+
+    <div class="panels">
+      <div class="panel">
+        <h3>Results by Class</h3>
+        <div id="classBreakdown"></div>
+      </div>
+      <div class="panel">
+        <h3>Overall Status Distribution</h3>
+        <div class="donut-wrap">
+          <div class="donut" id="donutChart"></div>
+          <div class="legend" id="donutLegend"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="filter-bar">
+      <input type="text" id="searchInput" placeholder="Search test name, class, or file…" aria-label="Search test name, class, or file" />
+      <select id="classSelect" aria-label="Filter by class"><option value="">All classes</option></select>
+      <select id="fileSelect" aria-label="Filter by file"><option value="">All files</option></select>
+      <div class="chip-group" id="statusChips"></div>
+      <button id="resetFiltersBtn">Reset filters</button>
+      <button id="exportCsvBtn">⬇ Export CSV</button>
+    </div>
+
+    <div class="panel panel-table">
+      <table id="resultsTable">
+        <thead>
+          <tr>
+            <th data-sort="result">Status</th>
+            <th data-sort="cls">Class</th>
+            <th data-sort="testId">Test</th>
+            <th data-sort="duration">Duration</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+    </div>
+    <div id="resultsCount" class="results-count"></div>
+  </div>
+
+  <div id="emptyState" class="empty-state">
+    <div class="big">📊</div>
+    <div><strong>No report loaded.</strong></div>
+    <div class="empty-detail">
+      Click <strong>Auto-fetch report.html</strong> if this dashboard sits next to
+      <code>report.html</code> and is served over <code>http://</code> (e.g. <code>python -m http.server</code>
+      in the <code>reports/</code> folder), or use <strong>Load report.html</strong> to pick the file manually
+      (works even opened directly as a <code>file://</code> page).
+    </div>
+  </div>
+</main>
+
+<footer>Reads pytest-html's embedded <code>#data-container[data-jsonblob]</code> JSON — no server or build step required.</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  const STATUS_COLORS = {
+    Passed: "#2fbf71", Failed: "#ef5164", Skipped: "#f2b134",
+    Error: "#b968ff", Rerun: "#7d8bab", XFailed: "#7d8bab", XPassed: "#7d8bab",
+  };
+  const STATUS_ORDER = ["Passed", "Failed", "Skipped", "Error", "Rerun", "XFailed", "XPassed"];
+
+  let allTests = [];       // flattened list of {testId, file, cls, name, result, duration, durationMs, log}
+  let filtered = [];
+  let activeStatuses = new Set();  // empty set = show all
+  let sortState = { key: "result", dir: 1 };
+  let autoRefreshTimer = null;
+
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+  function showBanner(msg, cls) {
+    const el = $("#statusBanner");
+    el.textContent = msg;
+    el.className = "status-banner show" + (cls ? " " + cls : "");
+  }
+  function clearBanner() {
+    $("#statusBanner").className = "status-banner";
+  }
+
+  function parseDurationToMs(d) {
+    if (!d) return 0;
+    const s = String(d).trim();
+    // pytest-html switches to H:MM:SS / HH:MM:SS for longer-running
+    // tests (common for real browser-automation runs) instead of "N ms".
+    const hms = s.match(/^(\d{1,2}):(\d{2}):(\d{2})$/);
+    if (hms) {
+      const [, h, m, sec] = hms;
+      return ((+h * 3600) + (+m * 60) + (+sec)) * 1000;
+    }
+    const m = s.match(/([\d.]+)\s*(ms|s|m|h)?/);
+    if (!m) return 0;
+    const val = parseFloat(m[1]);
+    const unit = m[2] || "ms";
+    if (unit === "ms") return val;
+    if (unit === "s") return val * 1000;
+    if (unit === "m") return val * 60000;
+    if (unit === "h") return val * 3600000;
+    return val;
+  }
+
+  function fmtDuration(ms) {
+    if (ms < 1000) return Math.round(ms) + " ms";
+    if (ms < 60000) return (ms / 1000).toFixed(2) + " s";
+    return (ms / 60000).toFixed(2) + " m";
+  }
+
+  // pytest testId format: "path/to/test_file.py::ClassName::test_name[params]"
+  function splitTestId(testId) {
+    const parts = testId.split("::");
+    let file = parts[0] || testId;
+    let cls = "(module-level)";
+    let name = testId;
+    if (parts.length === 3) {
+      file = parts[0]; cls = parts[1]; name = parts[2];
+    } else if (parts.length === 2) {
+      file = parts[0]; name = parts[1];
+    }
+    const shortFile = file.split("/").pop();
+    return { file: shortFile, cls, name };
+  }
+
+  function extractJsonBlob(htmlText) {
+    const m = htmlText.match(/id="data-container"\s+data-jsonblob="([\s\S]*?)"(?=\s*>)/);
+    if (!m) throw new Error("Could not find pytest-html's #data-container data-jsonblob in this file — is it a pytest-html --self-contained-html report?");
+    const ta = document.createElement("textarea");
+    ta.innerHTML = m[1];
+    const decoded = ta.value;
+    return JSON.parse(decoded);
+  }
+
+  function loadFromHtmlText(htmlText, sourceLabel) {
+    let data;
+    try {
+      data = extractJsonBlob(htmlText);
+    } catch (e) {
+      showBanner("⚠ " + e.message, "err");
+      return;
+    }
+
+    const flat = [];
+    Object.keys(data.tests || {}).forEach((testId) => {
+      const entries = data.tests[testId];
+      const entry = Array.isArray(entries) ? entries[entries.length - 1] : entries;
+      if (!entry) return;
+      const { file, cls, name } = splitTestId(testId);
+      const durationMs = parseDurationToMs(entry.duration);
+      flat.push({
+        testId, file, cls, name,
+        result: entry.result || "Unknown",
+        duration: entry.duration || "0 ms",
+        durationMs,
+        log: entry.log || "",
+      });
+    });
+
+    allTests = flat;
+    activeStatuses = new Set();
+    populateFilterOptions();
+    applyFilters();
+    renderKpis();
+    renderClassBreakdown();
+    renderDonut();
+
+    $("#dashboardContent").classList.remove("hidden");
+    $("#emptyState").classList.add("hidden");
+    const envInfo = data.environment || {};
+    const pkgVer = (envInfo.Packages && envInfo.Packages.pytest) || "?";
+    $("#metaLine").textContent =
+      `Loaded from ${sourceLabel} · ${flat.length} tests · pytest ${pkgVer} · ${new Date().toLocaleString()}`;
+    showBanner("✔ Report loaded successfully.", "ok");
+    setTimeout(clearBanner, 3000);
+  }
+
+  function populateFilterOptions() {
+    const classes = Array.from(new Set(allTests.map(t => t.cls))).sort();
+    const files = Array.from(new Set(allTests.map(t => t.file))).sort();
+
+    const classSelect = $("#classSelect");
+    const prevClass = classSelect.value;
+    classSelect.innerHTML = '<option value="">All classes</option>' +
+      classes.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+    classSelect.value = classes.includes(prevClass) ? prevClass : "";
+
+    const fileSelect = $("#fileSelect");
+    const prevFile = fileSelect.value;
+    fileSelect.innerHTML = '<option value="">All files</option>' +
+      files.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("");
+    fileSelect.value = files.includes(prevFile) ? prevFile : "";
+
+    const statusesPresent = STATUS_ORDER.filter(s => allTests.some(t => t.result === s));
+    $("#statusChips").innerHTML = statusesPresent.map(s =>
+      `<div class="chip" data-status="${s}">${s}</div>`
+    ).join("");
+    $$(".chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        const status = chip.dataset.status;
+        if (activeStatuses.has(status)) { activeStatuses.delete(status); chip.classList.remove("active"); }
+        else { activeStatuses.add(status); chip.classList.add("active"); }
+        applyFilters();
+      });
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function applyFilters() {
+    const q = $("#searchInput").value.trim().toLowerCase();
+    const cls = $("#classSelect").value;
+    const file = $("#fileSelect").value;
+
+    filtered = allTests.filter(t => {
+      if (cls && t.cls !== cls) return false;
+      if (file && t.file !== file) return false;
+      if (activeStatuses.size > 0 && !activeStatuses.has(t.result)) return false;
+      if (q && !(t.name.toLowerCase().includes(q) || t.cls.toLowerCase().includes(q) || t.file.toLowerCase().includes(q))) return false;
+      return true;
+    });
+
+    sortRows();
+    renderTable();
+  }
+
+  function sortRows() {
+    const { key, dir } = sortState;
+    filtered.sort((a, b) => {
+      let av = a[key], bv = b[key];
+      if (key === "duration") { av = a.durationMs; bv = b.durationMs; }
+      if (typeof av === "string") av = av.toLowerCase();
+      if (typeof bv === "string") bv = bv.toLowerCase();
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+  }
+
+  function renderKpis() {
+    const total = allTests.length;
+    const counts = {};
+    STATUS_ORDER.forEach(s => counts[s] = 0);
+    allTests.forEach(t => { counts[t.result] = (counts[t.result] || 0) + 1; });
+    const passed = counts.Passed || 0;
+    const failed = counts.Failed || 0;
+    const skipped = counts.Skipped || 0;
+    const errored = (counts.Error || 0) + (counts.Rerun || 0) + (counts.XFailed || 0) + (counts.XPassed || 0);
+    const rate = total ? ((passed / total) * 100).toFixed(1) : "0.0";
+
+    const cards = [
+      ["total", "Total Tests", total],
+      ["passed", "Passed", passed],
+      ["failed", "Failed", failed],
+      ["skipped", "Skipped", skipped],
+      ["error", "Error / Other", errored],
+      ["rate", "Pass Rate", rate + "%"],
+    ];
+    $("#kpiRow").innerHTML = cards.map(([cls, label, val]) =>
+      `<div class="kpi-card ${cls}"><div class="value">${val}</div><div class="label">${label}</div><div class="bar kpi-bar-full"></div></div>`
+    ).join("");
+  }
+
+  function renderClassBreakdown() {
+    const byClass = {};
+    allTests.forEach(t => {
+      byClass[t.cls] = byClass[t.cls] || { Passed: 0, Failed: 0, Skipped: 0, Error: 0, Other: 0, total: 0 };
+      const bucket = byClass[t.cls];
+      bucket.total++;
+      if (bucket[t.result] !== undefined) bucket[t.result]++;
+      else bucket.Other++;
+    });
+    const rows = Object.keys(byClass).sort();
+    $("#classBreakdown").innerHTML = rows.map(cls => {
+      const b = byClass[cls];
+      const segs = ["Passed", "Failed", "Skipped", "Error", "Other"].map(k => {
+        const pct = b.total ? (b[k] / b.total * 100) : 0;
+        const color = STATUS_COLORS[k] || "#7d8bab";
+        return pct > 0 ? `<div style="width:${pct}%; background:${color}" title="${k}: ${b[k]}"></div>` : "";
+      }).join("");
+      return `<div class="class-row">
+        <div class="cname" data-cls="${escapeHtml(cls)}" title="${escapeHtml(cls)}">${escapeHtml(cls)}</div>
+        <div class="stack">${segs}</div>
+        <div class="ccount">${b.total}</div>
+      </div>`;
+    }).join("") || `<div class="no-data-msg">No data.</div>`;
+
+    $$("#classBreakdown .cname").forEach(el => {
+      el.addEventListener("click", () => {
+        $("#classSelect").value = el.dataset.cls;
+        applyFilters();
+        $("#resultsTable").scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+  }
+
+  function renderDonut() {
+    const counts = {};
+    allTests.forEach(t => { counts[t.result] = (counts[t.result] || 0) + 1; });
+    const total = allTests.length || 1;
+    let cursor = 0;
+    const stops = [];
+    STATUS_ORDER.filter(s => counts[s]).forEach(s => {
+      const pct = (counts[s] / total) * 100;
+      const color = STATUS_COLORS[s];
+      stops.push(`${color} ${cursor}% ${cursor + pct}%`);
+      cursor += pct;
+    });
+    $("#donutChart").style.background = stops.length
+      ? `conic-gradient(${stops.join(", ")})`
+      : "#1b2540";
+    $("#donutChart").style.setProperty("--hole", "60%");
+    $("#donutChart").innerHTML = "";
+
+    $("#donutLegend").innerHTML = STATUS_ORDER.filter(s => counts[s]).map(s =>
+      `<div><span class="dot" style="background:${STATUS_COLORS[s]}"></span>${s}: ${counts[s]}</div>`
+    ).join("") || `<div class="no-data-msg">No data.</div>`;
+  }
+
+  function renderTable() {
+    const body = $("#resultsBody");
+    if (filtered.length === 0) {
+      body.innerHTML = `<tr><td colspan="4" class="no-match-msg">No tests match the current filters.</td></tr>`;
+      $("#resultsCount").textContent = `0 of ${allTests.length} tests shown`;
+      return;
+    }
+    body.innerHTML = filtered.map((t, i) => `
+      <tr class="data-row" data-idx="${i}">
+        <td><span class="badge ${t.result}">${t.result}</span></td>
+        <td class="test-class">${escapeHtml(t.cls)}</td>
+        <td>
+          <div class="test-name">${escapeHtml(t.name)}</div>
+          <div class="test-file">${escapeHtml(t.file)}</div>
+        </td>
+        <td>${escapeHtml(t.duration)}</td>
+      </tr>
+    `).join("");
+    $("#resultsCount").textContent = `${filtered.length} of ${allTests.length} tests shown`;
+
+    $$(".data-row").forEach(row => {
+      row.addEventListener("click", () => {
+        const idx = parseInt(row.dataset.idx, 10);
+        const existing = row.nextElementSibling;
+        if (existing && existing.classList.contains("log-row")) {
+          existing.remove();
+          return;
+        }
+        $$(".log-row").forEach(r => r.remove());
+        const t = filtered[idx];
+        const tr = document.createElement("tr");
+        tr.className = "log-row";
+        tr.innerHTML = `<td colspan="4">${escapeHtml(t.log || "No log output captured.")}</td>`;
+        row.after(tr);
+      });
+    });
+  }
+
+  function exportCsv() {
+    const header = ["Status", "Class", "File", "Test", "Duration"];
+    const rows = filtered.map(t => [t.result, t.cls, t.file, t.name, t.duration]);
+    const csv = [header, ...rows]
+      .map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `evafi_test_results_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function autoFetchReport() {
+    const candidates = ["report.html", "reports/report.html", "./report.html"];
+    for (const url of candidates) {
+      try {
+        const resp = await fetch(url, { cache: "no-store" });
+        if (resp.ok) {
+          const text = await resp.text();
+          loadFromHtmlText(text, url);
+          return;
+        }
+      } catch (e) {
+        // try next candidate / likely CORS-blocked on file://
+      }
+    }
+    showBanner(
+      "⚠ Could not auto-fetch report.html (tried report.html, reports/report.html). " +
+      "If you opened this file directly (file://), browsers block that fetch — serve this folder over " +
+      "http:// (e.g. `python -m http.server` in reports/) or use 'Load report.html' to pick the file manually.",
+      "err"
+    );
+  }
+
+  function setupSorting() {
+    $$("#resultsTable thead th").forEach(th => {
+      th.addEventListener("click", () => {
+        const key = th.dataset.sort;
+        if (sortState.key === key) sortState.dir *= -1;
+        else { sortState.key = key; sortState.dir = 1; }
+        sortRows();
+        renderTable();
+      });
+    });
+  }
+
+  function setupControls() {
+    $("#fileInput").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => loadFromHtmlText(reader.result, file.name);
+      reader.onerror = () => showBanner("⚠ Could not read the selected file.", "err");
+      reader.readAsText(file);
+    });
+    $("#autoFetchBtn").addEventListener("click", autoFetchReport);
+    $("#searchInput").addEventListener("input", applyFilters);
+    $("#classSelect").addEventListener("change", applyFilters);
+    $("#fileSelect").addEventListener("change", applyFilters);
+    $("#resetFiltersBtn").addEventListener("click", () => {
+      $("#searchInput").value = "";
+      $("#classSelect").value = "";
+      $("#fileSelect").value = "";
+      activeStatuses = new Set();
+      $$(".chip").forEach(c => c.classList.remove("active"));
+      applyFilters();
+    });
+    $("#exportCsvBtn").addEventListener("click", exportCsv);
+    $("#autoRefreshToggle").addEventListener("change", (e) => {
+      if (e.target.checked) {
+        autoRefreshTimer = setInterval(autoFetchReport, 30000);
+        showBanner("↻ Auto-refresh enabled — re-fetching report.html every 30s.", "ok");
+        setTimeout(clearBanner, 2500);
+      } else if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+      }
+    });
+  }
+
+  setupControls();
+  setupSorting();
+  // Best-effort silent auto-fetch on load; harmless no-op if it fails (e.g. file://).
+  autoFetchReport().catch(() => {});
+})();
+</script>
+</body>
+</html>

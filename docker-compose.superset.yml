@@ -1,0 +1,89 @@
+# docker-compose.superset.yml
+# ============================
+# Runs BOTH Postgres and Superset inside Docker, on the same Docker
+# network, so Superset reaches Postgres by SERVICE NAME ("postgres") --
+# no host.docker.internal, no pg_hba.conf edits, no listen_addresses
+# changes. This sidesteps the "port is closed" error entirely, which
+# was a container-vs-host networking issue (Superset's container
+# couldn't reach a Postgres server bound to 127.0.0.1 on the HOST
+# machine -- "localhost" inside a container means the container itself,
+# not your host).
+#
+# Postgres also publishes 5432 to your HOST machine (the "5432:5432"
+# line below), so your pytest hook (report_to_db.py, running in your
+# venv on the host, NOT in Docker) keeps working with EVAFI_DB_URL
+# pointed at localhost:5432 exactly as before -- nothing changes there.
+#
+# ── IMPORTANT ONE-TIME STEP ─────────────────────────────────────────
+# If you still have a HOST-installed PostgreSQL service running (the
+# one you set up earlier via `apt install postgresql`), it is ALSO
+# bound to port 5432 on your host and will collide with this
+# container's port mapping. Free the port first:
+#
+#     sudo systemctl stop postgresql
+#     sudo systemctl disable postgresql
+#
+# Your evafi_results database and its data live on disk under that
+# host Postgres install -- stopping the service doesn't delete it, it
+# just stops it from occupying port 5432. If you want that exact data
+# in the new containerized Postgres, the simplest path is to just
+# re-run `pytest` once against report.html after this compose stack is
+# up (see the walkthrough below) -- report_to_db.py will recreate both
+# tables and reload everything from report.html, since it's the same
+# real report.html that already produced correct data before.
+# ─────────────────────────────────────────────────────────────────────
+#
+# Usage:
+#   docker compose -f docker-compose.superset.yml up -d
+#   (wait ~20s for Postgres healthcheck to pass, then, first run only:)
+#   docker compose -f docker-compose.superset.yml exec superset superset fab create-admin \
+#       --username admin --firstname Admin --lastname User --email admin@example.com --password admin
+#   docker compose -f docker-compose.superset.yml exec superset superset db upgrade
+#   docker compose -f docker-compose.superset.yml exec superset superset init
+#
+# Then open http://localhost:8088 (login: admin / admin -- CHANGE THIS).
+#
+# In Superset's "Connect a database" form, use:
+#   Host:     postgres        <-- the Docker service name below, NOT "localhost"
+#   Port:     5432
+#   Database: evafi_results
+#   Username: postgres
+#   Password: postgres        <-- matches POSTGRES_PASSWORD below
+
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: evafi_postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=evafi_results
+    ports:
+      - "5432:5432"   # <-- lets your HOST-side pytest hook keep using localhost:5432
+    volumes:
+      - evafi_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  superset:
+    build: .
+    container_name: evafi_superset
+    ports:
+      - "8088:8088"
+    environment:
+      - SUPERSET_SECRET_KEY=change_this_to_a_random_string_in_production
+    volumes:
+      - ./reports:/app/evafi_reports:ro
+      - superset_home:/app/superset_home
+
+
+
+volumes:
+  evafi_pg_data:
+  superset_home:

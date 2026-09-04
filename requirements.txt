@@ -1,0 +1,8 @@
+pytest==8.3.3
+pytest-playwright==0.5.2
+playwright==1.47.0
+pytest-html==4.1.1
+pytest-xdist==3.6.1
+python-dotenv==1.0.1
+sqlalchemy==2.0.35
+psycopg2-binary==2.9.9
